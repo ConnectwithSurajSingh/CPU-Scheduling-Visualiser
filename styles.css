@@ -1,0 +1,770 @@
+/* ==========================================================================
+   CPU Lab — Dispatch
+   Zone map (ownership in AGENTS.md):
+     01 tokens (color-specialist)      08 gantt (color + motion)
+     02 base (layout-specialist)       09 results (typography)
+     03 typography (typography)        10 comparison (color)
+     04 shell + layout (layout)        11 learn + footer (typography)
+     05 components (interaction/color) 12 responsive (layout)
+     06 workbench (layout)             13 motion + reduced-motion (motion)
+     07 metrics strip (layout + type)  14 a11y utilities (accessibility)
+   Layout constants: container 1200px · padding 32/20 · gutter 24/16
+   Spacing scale 4/8/12/16/24/32/48/64 · section rhythm 64/48 · radius 2px
+   ========================================================================== */
+
+/* === 01 tokens === */
+
+:root {
+  --paper: #F4F5F6;
+  --surface: #FFFFFF;
+  --surface-sunken: #F1F2F4;
+  --ink: #17191C;
+  --ink-2: #565C63;
+  --ink-3: #6B7178;
+  /* +1 token beyond Appendix A (color pass, documented): primary-button hover,
+     ink lightened one step — §7 "hover (surface-sunken / ink lighten)" */
+  --ink-hover: #2A2D31;
+  --line: #E3E6E8;
+  --line-strong: #C7CCD1;
+  --control-border: #8E959C;
+  --signal: #BE2A20;
+  --signal-deep: #8F1F17;
+  --signal-soft: #FAEDEA;
+  --idle-a: #EDEFF1;
+  --idle-b: #F7F8F9;
+  --shadow-float: 0 1px 2px rgba(23,25,28,.07), 0 10px 28px rgba(23,25,28,.09);
+  --radius: 2px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  /* Idle hatch is mandated by DESIGN.md §4.1/§8 (Appendix A, verbatim) */
+  --idle-hatch: repeating-linear-gradient(135deg, var(--idle-a) 0 5px, var(--idle-b) 5px 10px); /* taste-skill-ignore: gradient */
+}
+
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+::selection { background: var(--signal-soft); color: var(--ink); }
+
+/* === 02 base === */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  /* IBM Plex Sans is the Dispatch text face (loaded in index.html); the system
+     stack keeps the page fully usable offline. */
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+h1, h2, h3, p { margin: 0; }
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.hidden { display: none !important; }
+
+/* === 03 typography === */
+/* Dispatch scale (§5): five text sizes + three data sizes, nothing between.
+   Faces: IBM Plex Sans 400/500/600 (all text) + IBM Plex Mono 400/500 (data
+   only), loaded via preconnect + one css2 link in index.html; the fallback
+   stacks keep the page fully usable offline.
+
+   Role            family/size/weight/line-height
+   ─────────────────────────────────────────────────────────────────────
+   h1 display      sans  clamp(26px,2.6vw,34px) / 600 / 1.2 / -0.01em
+   h2 section      sans  22px / 600 / 1.25   (also the #algoName briefing headline)
+   h3 panel title  sans  16px / 600 / 1.3
+   lead            sans  16px / 400 / 1.55 / --ink-2 / ≤72ch (zone 04)
+   body + UI       sans  14px / 400 / 1.5
+   small           sans  12px / 400–500 / 1.4 / --ink-3
+   data-lg         mono  28px / 500 / 1.2 — metric values
+   data            mono  14px — PIDs (500 in tables), numeric inputs, time
+                         readout, formulas; tabular figures on all numerics
+   data-xs         mono  11px — exactly: ruler ticks, Gantt segment duration
+                         captions, idle captions
+   No other sizes. Nothing below 12px outside those three 11px roles. */
+
+:root {
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+
+h1 { font-size: clamp(26px, 2.6vw, 34px); font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
+h2 { font-size: 22px; font-weight: 600; line-height: 1.25; }
+h3 { font-size: 16px; font-weight: 600; line-height: 1.3; }
+p  { font-size: 14px; line-height: 1.5; }
+strong { font-weight: 600; } /* primary emphasis; mono data readouts drop to 500 (zones 08–09) */
+.footnote { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+
+/* === 04 shell + layout === */
+
+:root { --gutter: 24px; } /* one gutter, horizontal + vertical; 16px at ≤720 (zone 12) */
+
+/*
+  Grid arithmetic (closes at every width; container is border-box, so at a
+  1440 viewport: 1200 container − 2×32 padding = 1136 inner):
+    workbench  7fr + 24 + 5fr                = 648.6 + 24 + 463.4 = 1136
+    metrics    4 × cell + 3 × 1px divider    = 4×283.25 + 3       = 1136
+    learn      3 × column + 2 × 1px divider  = 3×378 + 2          = 1136
+  One left edge: container padding → h1 → section heads → panels → footer.
+*/
+
+.container { max-width: 1200px; margin-inline: auto; padding-inline: 32px; }
+
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+.masthead-inner {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gutter);
+}
+.brand { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; }
+.brand-mark { width: 24px; height: 24px; flex: none; } /* empty slot — icon-specialist draws the schedule glyph here */
+.brand-name { font-size: 15px; font-weight: 600; white-space: nowrap; }
+.nav { display: flex; align-items: center; gap: var(--gutter); }
+.nav a { color: var(--ink-2); text-decoration: none; font-size: 14px; }
+
+.section { margin-top: 64px; }
+.section.intro { margin-top: 48px; max-width: 760px; }
+.intro-copy { margin-top: 16px; font-size: 16px; line-height: 1.55; color: var(--ink-2); max-width: 72ch; }
+
+.section-head { margin-bottom: 24px; }
+.section-description { margin-top: 8px; font-size: 14px; color: var(--ink-2); max-width: 72ch; }
+.section-head--split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px var(--gutter);
+}
+.section-caption { font-size: 14px; color: var(--ink-2); }
+
+main section[id] { scroll-margin-top: 72px; } /* clear the sticky 64px masthead */
+
+/* === 05 components === */
+
+/* Panels — §7: surface, 1px line, radius 2, no shadow; head 20px 22px + hairline */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px var(--gutter);
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--line);
+}
+.panel-heading { min-width: 0; }
+.panel-description { margin-top: 4px; font-size: 14px; color: var(--ink-2); max-width: 72ch; }
+.panel-body { padding: 20px 22px; }
+
+/* Buttons — §7: heights 36/32/28, radius 2, 14px/500, padding 0 14px */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--ink); color: var(--paper); }
+.btn-secondary { background: var(--surface); border-color: var(--control-border); color: var(--ink); }
+.btn-quiet { background: transparent; color: var(--ink-2); }
+.btn-small { height: 32px; padding: 0 12px; }
+.btn-icon { width: 32px; padding: 0; } /* icon-only slot — 32×32 target with a 16px glyph (§7/§9) */
+.btn:active, .icon-button:active, .nav a:active, .brand:active { transform: scale(0.97); } /* §10 press feedback on every pressable; brand link included (motion pass) */
+.btn:disabled { opacity: 0.45; transform: none; cursor: default; }
+
+.icon-button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  border-radius: var(--radius);
+}
+
+/* Fields — §7: 36px, radius 2, white, 1px control border, padding 0 10px */
+.field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.field label { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.field input,
+.field select {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+}
+.field input::placeholder { color: var(--ink-2); } /* --ink-3 failed 4.5:1 whenever the hover state moved the input onto --surface-sunken; see report */
+#pid, .field input[type="number"] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Field states — §4.2/§7: disabled 45% no transform; focus border --ink (the 2px
+   signal ring comes from :focus-visible); error border --signal. */
+input:disabled, select:disabled { opacity: 0.45; }
+.field input:focus-visible, .field select:focus-visible, .speed-control select:focus-visible { border-color: var(--ink); }
+/* Error pattern (§7): 12px --signal-deep message below the field. The markup and
+   aria-invalid/aria-describedby wiring is added by the interaction pass; the color
+   values are owned here so red stays inside the budget. */
+.field input[aria-invalid="true"], .field select[aria-invalid="true"] { border-color: var(--signal); }
+.field-error { font-size: 12px; line-height: 1.4; color: var(--signal-deep); }
+
+/* Icons — icon-specialist (§9): one family from the inline sprite; CSS sizes only.
+   16px in controls, 20px on the primary transport action (play/pause). */
+:root {
+  /* Drawn select chevron (§9) as one data URI reused by both selects. The stroke
+     colour is a literal (#565C63 = --ink-2) because data URIs cannot resolve
+     var(); it lives in :root so no raw hex escapes the token zone. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23565C63' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.svg-sprite { display: none; }
+.icon { width: 16px; height: 16px; flex: none; }
+.icon--20 { width: 20px; height: 20px; }
+.brand-mark svg { display: block; } /* block inside the fixed 24px slot; no baseline gap */
+
+/* Selects: drawn chevron instead of the native glyph; native popup behaviour kept.
+   Right padding clears the 16px chevron so text never collides. */
+.field select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
+  background-position: right 10px center;
+  padding: 0 30px 0 10px;
+}
+
+/* Checkboxes — §7: 16px, accent ink, label 14px --ink-2, 8px gap, row wraps */
+.check-option { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-2); cursor: pointer; }
+.check-option input { width: 16px; height: 16px; margin: 0; accent-color: var(--ink); }
+
+/* Tables — §7: 12px sentence-case headers, no fill, strong rule below; rows 44px */
+.table-wrap, .results-table-wrap {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) var(--surface-sunken);
+}
+table { width: 100%; border-collapse: collapse; }
+th {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-strong);
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--ink-3);
+  text-align: left;
+  white-space: nowrap;
+}
+td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  white-space: nowrap;
+}
+/* Table numerics (§5): sans + tabular figures, right-aligned. The first column
+   is the identity (PID), which renders mono via .mono in the markup — PIDs sit
+   at 500 per the data roles (§5 weights). */
+th:not(:first-child), td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+td.mono { font-weight: 500; }
+.empty-row { padding: 24px 12px; color: var(--ink-2); } /* --ink-3 failed 4.5:1 under the row-hover sunken ground; see report */
+/* PID is plain mono text — the legacy per-process rainbow dot is retired */
+
+/* Legend — §7: swatch is the mark itself, scaled; 12px --ink-2 label */
+.legend-item { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; line-height: 1.4; color: var(--ink-2); white-space: nowrap; }
+.legend-swatch { width: 10px; height: 10px; flex: none; }
+.swatch-busy { background: var(--surface); border: 1px solid var(--line-strong); }
+.swatch-running { background: var(--signal); }
+.swatch-idle { background: var(--idle-hatch); border: 1px solid var(--line); }
+.swatch-tat { background: var(--ink); }
+.swatch-wt { background: var(--signal); }
+
+/* Empty states — §7 wells: sunken ground, radius 2, one plain sentence */
+.gantt-empty,
+.compare-empty {
+  padding: 24px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+  color: var(--ink-2);
+}
+
+/* Toast — §7: ink ground, paper text, radius 2, float shadow, bottom-right */
+.toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 50;
+  max-width: min(420px, calc(100vw - 48px));
+  padding: 12px 16px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  font-size: 14px;
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+
+/* Pressed red = --signal-deep (§4.2): the danger controls are the only red-facing
+   controls; their pressed text deepens one step */
+.icon-button:active { color: var(--signal-deep); }
+
+/* Hover states — §10: gated to real pointers; color/press transitions in zone 13 */
+@media (hover: hover) and (pointer: fine) {
+  .nav a:hover { color: var(--ink); }
+  .btn-primary:hover { background: var(--ink-hover); }
+  .btn-secondary:hover { background: var(--surface-sunken); }
+  .btn-quiet:hover { color: var(--ink); }
+  .icon-button:hover { color: var(--signal); }
+  /* background-color, not the shorthand — the drawn select chevron must survive hover */
+  .field input:hover, .field select:hover, .speed-control select:hover { background-color: var(--surface-sunken); }
+  .check-option:hover { color: var(--ink); }
+  table tbody tr:hover td { background: var(--surface-sunken); }
+}
+
+/* === 06 workbench === */
+
+.workbench { display: grid; grid-template-columns: 7fr 5fr; gap: var(--gutter); align-items: stretch; }
+.control-panel { min-width: 0; }
+
+.algorithm-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 12px 16px; align-items: end; }
+.quantum-wrap { display: none; }
+.quantum-wrap.visible { display: flex; }
+
+.divider-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 24px 0 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+.input-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; }
+.input-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+
+.run-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px var(--gutter);
+  margin-top: 16px;
+}
+.run-note { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.run-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Briefing panel — stretches to share the control panel's bottom edge; the
+   numbered rules become hairline rows that fill the remaining height. */
+.insight-panel { display: flex; flex-direction: column; min-width: 0; }
+.insight-panel .panel-body { flex: 1; display: flex; flex-direction: column; }
+.algo-type { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.algo-name { margin-top: 8px; font-size: 22px; font-weight: 600; line-height: 1.25; } /* briefing headline rides the h2 tier (§5) */
+.algo-copy { margin-top: 8px; color: var(--ink-2); }
+.rule-list { flex: 1; display: flex; flex-direction: column; margin-top: 16px; padding: 0; list-style: none; counter-reset: rule; }
+.rule {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+}
+/* The number is a CSS counter on a real <ol> item — semantics for AT, spec-sheet
+   marks for sight (role="list" restores list semantics where list-style: none drops them) */
+.rule::before {
+  counter-increment: rule;
+  content: counter(rule);
+  flex: none;
+  min-width: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+/* === 07 metrics strip === */
+
+.metrics-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.metric-cell { min-width: 0; padding: 20px 22px; }
+.metric-cell + .metric-cell { border-left: 1px solid var(--line); }
+.metric-label { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.metric-value { margin-top: 8px; font-size: 28px; font-weight: 500; line-height: 1.2; } /* data-lg: mono via .mono in the markup */
+.metric-foot { margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+
+/* === 08 gantt === */
+
+.gantt-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.gantt-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px var(--gutter);
+  padding: 16px 22px;
+}
+.transport { display: flex; align-items: center; gap: 8px; }
+.transport .btn-small { min-width: 32px; }
+.timeline-state { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.timeline-state span { font-size: 14px; color: var(--ink-2); }
+.timeline-state strong { font-weight: 500; color: var(--ink); }
+.speed-control { display: flex; align-items: center; gap: 8px; }
+.speed-control label { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.speed-control select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
+  background-position: right 8px center;
+  padding: 0 26px 0 8px; /* clear the drawn chevron */
+}
+
+/* Horizontal scroll lives inside the panel only (§6) */
+.gantt-scroll {
+  overflow-x: auto;
+  padding: 0 22px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) var(--surface-sunken);
+}
+.gantt-inner { position: relative; width: max-content; min-width: 100%; padding-top: 12px; }
+
+.gantt-track {
+  position: relative;
+  height: 56px;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.gantt-segment {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
+  background: var(--surface); /* busy cells: neutral white on the sunken track (§8) */
+  border: 1px solid var(--line-strong); /* permanent 1px cell borders: activation swaps color only, never width (no layout shift) */
+  container-type: inline-size;
+}
+.gantt-segment.idle { background: var(--idle-hatch); }
+/* Active = the one saturated fill on the page: --signal ground, paper text,
+   full 1px --signal-deep border. No glow, no pulse (§8). Exactly one at a time. */
+.gantt-segment.active { background: var(--signal); border-color: var(--signal-deep); z-index: 2; }
+.segment-id { font-family: var(--font-mono); font-size: 12px; font-weight: 500; line-height: 1.2; color: var(--ink); }
+.segment-duration { font-family: var(--font-mono); font-size: 11px; line-height: 1.2; color: var(--ink-3); } /* data-xs role */
+/* Idle caption: mono 11px on the hatch (§8). --ink-3 was suggested but computes
+   4.28:1 on --idle-a (< 4.5 floor); --ink-2 passes at 5.86:1 — documented deviation. */
+.gantt-segment.idle .segment-id,
+.gantt-segment.idle .segment-duration { font-size: 11px; font-weight: 400; color: var(--ink-2); }
+.gantt-segment.active .segment-id { color: var(--paper); }
+/* §8 asks 75% white for the active duration; that blends to 3.64:1 on --signal,
+   below the 4.5 text floor — raised to 90% white (4.67:1). Documented deviation. */
+.gantt-segment.active .segment-duration { color: var(--paper); opacity: 0.9; }
+/* Duration captions hide when the cell is too narrow to hold them (§8) */
+@container (max-width: 43px) { .gantt-segment .segment-duration { display: none; } }
+@container (max-width: 55px) { .gantt-segment.idle .segment-duration { display: none; } }
+
+.playhead {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-1px);
+  background: var(--signal);
+  pointer-events: none;
+}
+.playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  background: var(--signal);
+}
+
+.time-ruler { position: relative; height: 28px; }
+.time-tick {
+  position: absolute;
+  top: 10px;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 11px; /* data-xs role */
+  line-height: 1;
+  color: var(--ink-3);
+}
+.time-tick::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  width: 1px;
+  height: 5px;
+  background: var(--line-strong);
+}
+.time-tick.first { transform: none; }
+.time-tick.first::before { left: 0; }
+.time-tick.last { transform: translateX(-100%); }
+.time-tick.last::before { left: 100%; }
+
+/* === 09 results === */
+
+.results-summary { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.results-stat { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.results-stat strong { font-weight: 500; color: var(--ink); }
+/* Average row by rule, not tint (§7): strong hairline over the totals */
+.results-table tfoot td { border-top: 1px solid var(--line-strong); border-bottom: 0; font-weight: 500; }
+.average-label { text-align: right; font-size: 12px; line-height: 1.4; color: var(--ink-2); }
+
+/* === 10 comparison === */
+
+.compare-select { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 16px; }
+.compare-chart, .compare-empty { margin-top: 16px; }
+.compare-chart { display: grid; gap: 16px; }
+.compare-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+.compare-name { font-size: 14px; color: var(--ink-2); }
+.bars { display: grid; gap: 4px; padding-right: 56px; } /* right lane reserved for the value column */
+.bar-line { position: relative; height: 12px; background: var(--surface-sunken); }
+.bar-fill { height: 100%; width: 0; }
+.bar-fill.tat { background: var(--ink); }
+.bar-fill.wt { background: var(--signal); }
+.bar-value {
+  position: absolute;
+  right: -56px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.best-callout {
+  display: none;
+  padding: 16px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+}
+.best-callout.visible { display: block; margin-top: 24px; }
+.compare-panel .footnote { margin-top: 16px; max-width: 72ch; }
+
+/* === 11 learn + footer === */
+
+/* Three hairline-divided columns, no outer container (§6) */
+.learn-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.learn-card { min-width: 0; padding: 0 var(--gutter); }
+.learn-card:first-child { padding-left: 0; }
+.learn-card:last-child { padding-right: 0; }
+.learn-card + .learn-card { border-left: 1px solid var(--line); }
+.learn-card p { margin-top: 8px; color: var(--ink-2); }
+.formula {
+  display: inline-block;
+  margin-top: 16px;
+  padding: 8px 12px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--ink);
+}
+.learn-footnote { max-width: 90ch; margin-top: 24px; }
+
+.site-footer { margin-top: 64px; border-top: 1px solid var(--line); }
+.site-footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px var(--gutter);
+  padding-block: 24px 32px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+/* === 12 responsive === */
+/* Breakpoints: 1024 workbench stacks · 720 compact (20px padding, 16px gutter,
+   metrics 2×2) · 480 controls stack. Verified at 1440 / 1024 / 720 / 390. */
+
+@media (max-width: 1024px) {
+  .workbench { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 720px) {
+  :root { --gutter: 16px; }
+  .container { padding-inline: 20px; }
+  .section { margin-top: 48px; }
+  .section.intro { margin-top: 32px; }
+  .site-footer { margin-top: 48px; }
+
+  .panel-head, .panel-body { padding: 16px 20px; }
+  .gantt-controls { padding: 12px 20px; }
+  .gantt-scroll { padding: 0 20px 16px; }
+
+  /* Metrics: one strip, 2×2 — outer cells lose the left divider, the bottom
+     row gains the top divider. 2 × cell + 1 + 2 = inner width. */
+  .metrics-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-cell { padding: 16px 20px; }
+  .metric-cell:nth-child(odd) { border-left: 0; }
+  .metric-cell:nth-child(n+3) { border-top: 1px solid var(--line); }
+
+  .input-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* Learn stacks: divider becomes a top rule */
+  .learn-grid { grid-template-columns: 1fr; }
+  .learn-card { padding: 0; }
+  .learn-card + .learn-card { border-left: 0; border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
+
+  .toast { right: 16px; bottom: 16px; max-width: calc(100vw - 32px); }
+}
+
+@media (max-width: 480px) {
+  .nav { gap: 16px; }
+  .algorithm-row { grid-template-columns: 1fr; }
+  .input-actions { align-items: stretch; }
+  .input-actions .btn { flex: 1; }
+  .run-strip { flex-direction: column; align-items: stretch; }
+  .run-buttons { width: 100%; }
+  .run-buttons .btn { flex: 1; }
+  .compare-row { grid-template-columns: 1fr; gap: 8px; }
+}
+
+/* === 13 motion + reduced-motion (motion-specialist, §10) ===
+   Durations: press 120ms · hover/state 160ms · toast + bar reveal 200ms.
+   Easings: --ease-out for UI state; the playback itself runs linear (produced
+   per frame by app.js, no CSS transition). Properties: transform, opacity,
+   background-color, border-color, color only — never layout. */
+
+/* Press feedback (§10): scale .97 @120ms on every pressable element, including
+   the brand link. State colors (hover, focus border, disabled tint) ride the
+   160ms band. Transform and color split so a press never waits on a color. */
+.btn, .icon-button, .nav a {
+  transition: transform 0.12s var(--ease-out), background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out), color 0.16s var(--ease-out);
+}
+.brand { transition: transform 0.12s var(--ease-out); }
+/* Inputs, the speed select, and the checkbox label: state colors only. The
+   label (.check-option) is what changes color on hover; the checkbox input
+   itself has no transitionable state. */
+.field input, .field select, .speed-control select, .check-option {
+  transition: background-color 0.16s var(--ease-out), border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out);
+}
+
+/* Gantt segment activation (§10): a crisp 160ms background/border crossfade —
+   no glow, no pulse, no scale. */
+.gantt-segment { transition: background-color 0.16s var(--ease-out), border-color 0.16s var(--ease-out); }
+
+/* Active results row (§7, dispatched): the executing process's row carries
+   --signal-soft with a --signal-deep identity, in step with segment
+   activation (160ms). The (0,2,3) specificity outranks the gated row hover
+   (0,1,4), so the tint survives a pointer resting on the row. */
+.results-table tbody td { transition: background-color 0.16s var(--ease-out); }
+.results-table tbody tr.is-active td { background: var(--signal-soft); }
+.results-table tbody tr.is-active td.mono { color: var(--signal-deep); }
+
+/* Playhead (§8/§10): no CSS transition. app.js moves it per frame with
+   `transform: translateX()`, which stays linear and keeps layout out of the
+   playback loop; a transition here would double-ease the honest clock. */
+
+/* Comparison bar reveal (§8): one-shot scaleX 0 → 1 from the left edge, 200ms,
+   once per run — never on hover or scroll. The fill's inline width already
+   carries the final value, so this animates transform only. */
+.bar-fill {
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.2s var(--ease-out);
+}
+.bar-fill.revealed { transform: scaleX(1); }
+
+/* Toast (§7/§10): transition-based, interruptible, same direction in and out
+   (rises 8px from below, sinks back below). @starting-style covers an engine
+   that first renders the element with .show; the persistent element + class
+   toggle above is the graceful fallback and does the everyday work. */
+.toast { transition: opacity 0.2s var(--ease-out), transform 0.2s var(--ease-out); }
+@starting-style {
+  .toast.show { opacity: 0; transform: translateY(8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  /* Ornamental transitions off — state changes snap (§10). */
+  .btn, .icon-button, .nav a, .brand,
+  .field input, .field select, .speed-control select, .check-option,
+  .gantt-segment, .results-table tbody td { transition: none; }
+  /* Press scale is movement: dropped, colors remain. */
+  .btn:active, .icon-button:active, .nav a:active, .brand:active { transform: none; }
+  /* Bar reveal: finished state immediately, no transform, no reveal motion. */
+  .bar-fill { transform: none; transition: none; }
+  /* Toast keeps comprehension: opacity-only fade, no travel. */
+  .toast, .toast.show { transform: none; }
+  .toast { transition: opacity 0.2s var(--ease-out); }
+}
+
+/* === 14 a11y utilities (accessibility-specialist) === */
+
+/* Rendered only to assistive technology (e.g. the actions column header in the
+   input table). Invisible at every width; no display toggling, so it can never
+   trip the layout zones. */
+.visually-hidden {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

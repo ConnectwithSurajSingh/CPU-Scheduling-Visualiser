@@ -1,0 +1,6 @@
+# Generated design-tooling output (Taste skill inspector/lint runs)
+.taste-skill/
+
+# Python bytecode caches (generated when skill scripts run)
+__pycache__/
+*.pyc
